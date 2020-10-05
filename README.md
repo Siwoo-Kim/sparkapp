@@ -73,6 +73,8 @@ Driver 프로세스가 할당한 작업을 수행. 익스큐터의 갯수는 병
 파티션이 하나라면 복수의 Executor 라도 병렬성은 1. <br/> 
 그 반대도 1 (하나의 Executor 복수의 파티션.)
 
+    spark.conf.set("spark.sql.shuffle.partitions", 5)
+    //shuffle 시 생성되는 파티션의 갯수 설정
 넓은 의존성  @wide dependency
 -
 * Transformation 의 한 종류. 
@@ -94,6 +96,19 @@ Driver 프로세스가 할당한 작업을 수행. 익스큐터의 갯수는 병
     siwoo@siwoo-ubuntu:~/work/workspace/sparkapp$ $SPARK_HOME/bin/spark-shell
     </pre>
 
+클러스터에서 스파크 실행 @spark-submit
+-
+개발한 spark application (jars) 을 클러스터 매니저에게 전송해 실행.
+
+* class = 메인 클래스
+* master = 클러스터 매니저 url
+    
+    siwoo@siwoo-ubuntu:~/work/workspace/sparkapp$ mvn clean install
+    $SPARK_HOME/bin/spark-submit 
+    --class com.siwoo.basic.BasicExample    //main class
+    target/sparkapp-1.0-SNAPSHOT.jar  /home/siwoo/work/workspace/sparkapp/src/main/resources //jar & arg
+
+ 
 메이븐과 스칼라 @scala-maven-plugin
 -
 메이븐 빌드시 스칼라를 컴파일하는 플로그인.
@@ -122,6 +137,72 @@ Driver 프로세스가 할당한 작업을 수행. 익스큐터의 갯수는 병
     &lt;/build&gt;
 </pre>
 
+구조적 API @structure api
+-
+DataSet, DataFrame, SQL 테이블과 View
+
 DataFrame    @DataFrame
 -
-데이터를 row 와 column 으로 표현하는 structure api
+데이터를 row 와 column 으로 표현하는 'untyped' structure api
+=> 데이터 타입을 런타임에 결정.
+=> Row 타입으로 구성된 DataSet
+
+Column  @column
+-
+row 에 대한 데이터 타입을 정의와 참조하는 방법을 제공.
+* 단순 데이터 타입
+* 복합 데이터 타입 
+
+
+    val column = $"num"
+    val df = spark.range(100).toDF("num").select(column)
+    
+Row @row
+-
+데이터 레코드.
+
+    val rows: Array[Row] = df.take(10)
+    rows.foreach(r => println(r.getAs[Int]("num")))
+
+스파크 데이터 타입 @data type
+-
+스파크 내부에서 사용하는 데이터 타입.
+
+    val schema = StructType(
+                Seq(StructField("num", IntegerType, false), 
+                    StructField("even", BooleanType, false)))
+Schema   @schema
+-
+컬럼명과 그 컬럼의 데이터 타입을 정의한 집합.
+
+카탈리스트 엔진    @catalyst engine
+-
+사용자 코드를 컴파일하여 실행 계획 수립과 최적화를 실행하는 스파크 엔진.  
+
+고급 주제
+=
+실행 계획   @execution plan
+-
+구조적 API 은 execution plan 을 제공한다. <br/>
+execution plan 은 DAG (directed acyclic graph) 이며, 액션 호출시 생성.  <br/>
+각 단계 (transformation) 는 불변성의 DataFrame  을 생성. <br/>
+실행 계획은 밑에서 위로 읽으며 디버깅에 유용.
+
+       val df2 = df.groupBy("dest_country_name")
+                .agg(sum($"count").as("sums"))
+                .orderBy($"sums".desc_nulls_last)
+
+       == Physical Plan ==
+       *(3) Sort [sums#66L DESC NULLS LAST], true, 0    // 최종 결과
+       +- Exchange rangepartitioning(sums#66L DESC NULLS LAST, 5)   //셔플
+          +- *(2) HashAggregate(keys=[dest_country_name#10], functions=[sum(cast(count#12 as bigint))])
+             +- Exchange hashpartitioning(dest_country_name#10, 5)
+                +- *(1) HashAggregate(keys=[dest_country_name#10], functions=[partial_sum(cast(count#12 as bigint))])
+                   +- *(1) FileScan csv [DEST_COUNTRY_NAME#10,count#12] Batched: false, Format: CSV, Location: InMemoryFileIndex[file://..., PartitionFilters: [], PushedFilters: [], ReadSchema: struct<DEST_COUNTRY_NAME:string,count:int>
+                            //데이터 소스
+ 
+ 실행 계획의 과정.
+ 1. 구조적 api (DataFrame) 을 통해 코드 작성.
+ 2. Catalyst Optimizer에 의해 논리적 실행 계획 (logical execution plan) 으로 변환. (표현식 컴파일, 컬럼과 테이블 검증)
+ 3. 물리적 실행 계획 (physical execution plan) 으로 변환후 최적화 (비용 모델 - 테이블의 크기, 파티션 수 - 을 이용한 전략 선택 )
+ 4. 물리적 실행 계획 (RDD) 이 실행.
