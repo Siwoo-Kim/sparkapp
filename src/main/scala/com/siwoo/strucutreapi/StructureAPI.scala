@@ -4,6 +4,7 @@ import org.apache.spark.sql.types.{BooleanType, IntegerType, StructField, Struct
 import org.apache.spark.sql.{Row, SparkSession}
 
 object StructureAPI {
+
     val spark = SparkSession.builder()
             .appName("structureapi")
             .master("local")

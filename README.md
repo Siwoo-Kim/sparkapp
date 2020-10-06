@@ -75,6 +75,24 @@ Driver 프로세스가 할당한 작업을 수행. 익스큐터의 갯수는 병
 
     spark.conf.set("spark.sql.shuffle.partitions", 5)
     //shuffle 시 생성되는 파티션의 갯수 설정
+    
+리파티셔닝 과 병합  @repartition @coalesce
+-
+쿼리시 최적화 기법으로 자주 필터링하는 컬럼을 기준으로 데이터를 재분할.
+물리적 데이터 구성을 제어할 수 있음.
+리파티셔닝시 데이터가 셔플(노드간 데이터 교환) 이 되며 (성능 요구), 
+변경할 파티션 수가 현재 파티션 수보다 많거나 컬럼으로 기준으로 파티션을 만드는 경우에만 사용.
+
+    df = df.repartition($"destination") 
+
+병합은 데이터를 셔플하지 않고 파티션을 합치는 경우에 사용. eg) 파티션 저장시 수 많은 작은 파일 대신 큰 파일이 필요할 때. (파티션 갯수 = 저장되는 파일의 갯수)
+    
+    df.repartition(5, $"destination") 
+        //destination 기준으로 데이터가 셔플링. 다음 destinatio``n 컬럼 기준 필터링시 성능 개선
+        .coalesce(2)    
+        //두 개의 파일이 생성
+        .write
+        .parquet(s"$MOUNT_PATH/save/flights")
 넓은 의존성  @wide dependency
 -
 * Transformation 의 한 종류. 
@@ -147,16 +165,52 @@ DataFrame    @DataFrame
 => 데이터 타입을 런타임에 결정.
 => Row 타입으로 구성된 DataSet
 
+    import spark.implicits._    //encoder 객체 지원
+    Seq(("1", "hello"), ("2", "spark"), ("3", "bye")).toDF("num", "comment").show()
+
 Column  @column
 -
-row 에 대한 데이터 타입을 정의와 참조하는 방법을 제공.
+row 에 대한 데이터 타입 정보를 가지며 데이터를 참조하는 방법을 제공. <br/>
+컬럼은 데이터을 선택, 조작하는 연산 표현식이다.
+
 * 단순 데이터 타입
 * 복합 데이터 타입 
+<pre>
+val column = $"num"
+val df = spark.range(100).toDF("num").select(column)
+</pre>
 
-
-    val column = $"num"
-    val df = spark.range(100).toDF("num").select(column)
+컬럼은 직접 참조 (join 식 유용), 간접 참조 방식이 있다.
     
+    val c1 = df.col("destination_country_name") //직접 참조
+    val c2 = $"destination_country_name"    //간접 참조
+
+표현식 @expr
+-
+표현식은 컬럼명을 입력 받아 데이터를 식별하고, '단일 값' 을 만들기 위한 함수.
+
+    val exp1 = ((($"someCol" + 5) * 200) - 6) < $"otherCol"
+    val exp2 = expr("(((someCol + 5) * 200) - 6) < otherCol")
+
+    df.select(expr("dest_country_name as destination"),
+        expr("(dest_country_name = origin_country_name) as withinCountry"))
+            .where($"withinCountry")
+            .show()
+            
+리터럴 @literal
+-
+DataFrame 조작시 컬럼 참조가 아닌 상 값이 필요할 때 사용.
+
+    //literal
+    df.withColumn("one", lit(1)).show()
+
+캐스팅 @casting
+-
+DataFrame 컬럼 조작시 cast 함수로 다른 데이터 타입으로 형변환을 의미.
+
+    //casting
+    df.withColumn("countString", $"count".cast(StringType)).show()
+
 Row @row
 -
 데이터 레코드.
@@ -171,10 +225,30 @@ Row @row
     val schema = StructType(
                 Seq(StructField("num", IntegerType, false), 
                     StructField("even", BooleanType, false)))
+                    
+Union @union
+    두 개의 DataFrame (동일한 컬럼들로 정의된) 을 합치는 연산.
+    union 은 schema 가 아닌 컬럼 위치 기반으로 동작.
+    
+    val rows = Seq(Row("Korea", "Canada", 20), Row("Canada", "Korea", 24))
+    val rdd = spark.sparkContext.parallelize(rows)
+    val newDF = spark.createDataFrame(rdd, df.schema)
+    df.union(newDF)
+            .where($"destination" === "Korea")
+            .show()
+
 Schema   @schema
 -
 컬럼명과 그 컬럼의 데이터 타입을 정의한 집합.
 
+    val schema = df.schema
+    df.printSchema()
+    
+    root
+     |-- DEST_COUNTRY_NAME: string (nullable = true)
+     |-- ORIGIN_COUNTRY_NAME: string (nullable = true)
+     |-- count: long (nullable = true)
+    
 카탈리스트 엔진    @catalyst engine
 -
 사용자 코드를 컴파일하여 실행 계획 수립과 최적화를 실행하는 스파크 엔진.  
