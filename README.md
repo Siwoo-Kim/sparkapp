@@ -2,6 +2,11 @@
 ==
 해당 문서는 스파크 개념 & 용어 간략 설명.
 
+<hr/>
+
+(1) 기본 개념 파트
+=
+
 스파크 Spark   @spark
 -
 클러스터 환경에서 데이터 빅데이터 를 병렬로 처리하는 computing engine<br/>
@@ -93,6 +98,7 @@ Driver 프로세스가 할당한 작업을 수행. 익스큐터의 갯수는 병
         //두 개의 파일이 생성
         .write
         .parquet(s"$MOUNT_PATH/save/flights")
+        
 넓은 의존성  @wide dependency
 -
 * Transformation 의 한 종류. 
@@ -155,8 +161,10 @@ Driver 프로세스가 할당한 작업을 수행. 익스큐터의 갯수는 병
     &lt;/build&gt;
 </pre>
 
-구조적 API @structure api
--
+<hr/>
+
+(2) 구조적 API @structure api
+==
 DataSet, DataFrame, SQL 테이블과 View
 
 DataFrame    @DataFrame
@@ -225,6 +233,10 @@ Row @row
     val schema = StructType(
                 Seq(StructField("num", IntegerType, false), 
                     StructField("even", BooleanType, false)))
+
+    df.where($"invoiceNo".equalTo(lit(536365)))
+            .select("invoiceNo", "description")
+            .show(5)
                     
 Union @union
     두 개의 DataFrame (동일한 컬럼들로 정의된) 을 합치는 연산.
@@ -248,7 +260,159 @@ Schema   @schema
      |-- DEST_COUNTRY_NAME: string (nullable = true)
      |-- ORIGIN_COUNTRY_NAME: string (nullable = true)
      |-- count: long (nullable = true)
+
+Filtering @filter
+-
+복수의 필터링이 결합될 땐 and 연산으로 적용된다.
+or 연산이 필요할 시 column.or() 을 사용.
+* 스칼라의 동등 여부는 ===, =!= 사용해야 한다.
+
+    val priceFilter = $"unitprice" > 600
+    val descFilter = $"description".contains("POSTAGE")
     
+    df.where($"stockcode".isin("DOT", "UNKNOWN"))
+            .where(priceFilter.or(descFilter))
+            .show(5)
+    
+    spark.sql(
+        """
+           select * from retail
+           where (unitprice > 600 or instr(description, 'POSTAGE')
+            and stockcode in ('DOT', 'UNKNOWN')
+           limit 5
+          """).show()
+
+Functions @functions
+-
+DataFrame, Dataset 관련 다양한 함수를 제공.
+아래는 알아두면 좋은 함수들.
+
+수치형 관련 함수
+-
+* 반올림 - round(컬럼 ,소숫점 자리수)
+* 상관계수 - corr(컬럼1, 컬럼2)
+* 통계 요약 (count, mean, 표준편차, 최솟값, 최대값) - df.describe
+
+
+    df.describe("unitprice", "quantity").show()
+    +-------+-----------------+-----------------+
+    |summary|        unitprice|         quantity|
+    +-------+-----------------+-----------------+
+    |  count|           541909|           541909|
+    |   mean|4.611113626089641| 9.55224954743324|
+    | stddev|96.75985306117963|218.0811578502335|
+    |    min|        -11062.06|           -80995|
+    |    max|          38970.0|            80995|
+    +-------+-----------------+-----------------+
+    
+문자열 관련 함수
+-
+* 문자열 변경 - initcap, upper, lower, ltrim, rtrim, trim, lpad, rpad, translate
+* 문자열 검색 & 정규표현식 관련 - instr (sql), regexp_extract, regexp_replace, contains
+
+
+    val columns = colors.map(c => $"description".contains(c.toUpperCase()).as(s"is_$c")) :+ expr("*")
+    df.select(columns:_*).where($"is_white".or($"is_black")).show() 
+
+날짜 관련 함수
+-
+날짜 조작 이전에 시간대 (timezone) 과 포맷이 유효한지 먼저 확인하라.
+날짜 관련 데이터 - Date
+날짜 + 시간 관련 데이터 - Timestamp
+시간대 설정시 spark.conf.
+
+* 날짜 생성 함수 - current_date, current_timestamp, to_date, to_timestamp
+* 날짜 변경 함수 - date_add, date_sub
+* 날짜 비교 함수 - datediff, months_between, >, <, ===
+
+Null 관련 함수.
+-
+DataFrame.na 을 이용.
+
+coalesce - 여러 컬럼 중 null 이 아닌 첫번 째 값 반환. (디폴트값 제공 가능)
+
+*. 널처리 - coalesce, ifnull, nullif...
+*. 널 로우 제거. - df.na.drop(모드) 
+    1. any 모드. 지정한 컬럼 중 하나라도 null 이면 로우를 제거.
+    2. all 모드. 지정한 컬림이 모두 null 이거나 NaN 인 경우 로우를 제거.
+    
+    val rdd = spark.sparkContext.parallelize(Seq(Row(1, 2), Row(null, 1), Row(1, null), Row(null, null)))
+    val df2 = spark.createDataFrame(rdd, schema)
+    
+    df2.na.drop("any").show()
+    +-----+------+
+    |first|second|
+    +-----+------+
+    |    1|     2|
+    +-----+------+
+
+    df2.na.drop("all").show()
+    +-----+------+
+    |first|second|
+    +-----+------+
+    |    1|     2|
+    | null|     1|
+    |    1|  null|
+    +-----+------+
+    
+    df2.na.drop("any", Seq("first")).show()
+    +-----+------+
+    |first|second|
+    +-----+------+
+    |    1|     2|
+    |    1|  null|
+    +-----+------+
+    
+    
+*. 널 로우 처리. - df.na.fill()
+지정한 컬럼이 null 인 경우 특정 값으로 채워넣음.
+ 
+    df2.na.fill(Map("first" -> -1, "second" -> -99)).show()
+
+*. 조건에 따라 다른 값으로 대체. - df.na.replace
+    
+DataFrame.describe
+-
+count, 평균, 표준편차, min, max 등의 집계 결과를 제공.
+
+    //요약 통계 - count, mean, stddev (표준편차), min, max 
+    df.describe().show()
+    
+    +-------+------------------+------------------+--------------------+-----------------+-----------------+------------------+-----------+
+    |summary|         InvoiceNo|         StockCode|         Description|         Quantity|        UnitPrice|        CustomerID|    Country|
+    +-------+------------------+------------------+--------------------+-----------------+-----------------+------------------+-----------+
+    |  count|            541909|            541909|              540455|           541909|           541909|            406829|     541909|
+    |   mean|  559965.752026781|27623.240210938104|             20713.0| 9.55224954743324|4.611113626089641|15287.690570239585|       null|
+    | stddev|13428.417280796697|16799.737628427683|                 NaN|218.0811578502335|96.75985306117963| 1713.600303321597|       null|
+    |    min|            536365|             10002| 4 PURPLE FLOCK D...|           -80995|        -11062.06|           12346.0|  Australia|
+    |    max|           C581569|                 m|   wrongly sold sets|            80995|          38970.0|           18287.0|Unspecified|
+    +-------+------------------+------------------+--------------------+-----------------+-----------------+------------------+-----------+
+
+DataFrameStatFunctions @DataFrameStatFunctions
+-
+Dataset 의 하위 모듈로 통계 관련 함수를 제공.
+
+monotonically_increasing_id
+-
+모든 로우에 0부터 시작하는 고유 ID 값을 추가.
+
+    df.select(monotonically_increasing_id(), expr("*")).show()
+    
+    +-----------------------------+---------+---------+--------------------+--------+-------------------+---------+----------+--------------+
+    |monotonically_increasing_id()|InvoiceNo|StockCode|         Description|Quantity|        InvoiceDate|UnitPrice|CustomerID|       Country|
+    +-----------------------------+---------+---------+--------------------+--------+-------------------+---------+----------+--------------+
+    |                            0|   580538|    23084|  RABBIT NIGHT LIGHT|      48|2011-12-05 08:38:00|     1.79|   14075.0|United Kingdom|
+    |                            1|   580538|    23077| DOUGHNUT LIP GLOSS |      20|2011-12-05 08:38:00|     1.25|   14075.0|United Kingdom|
+    |                            2|   580538|    22906|12 MESSAGE CARDS ...|      24|2011-12-05 08:38:00|     1.65|   14075.0|United Kingdom|
+    |                            3|   580538|    21914|BLUE HARMONICA IN...|      24|2011-12-05 08:38:00|     1.25|   14075.0|United Kingdom|
+    |                            4|   580538|    22467|   GUMBALL COAT RACK|       6|2011-12-05 08:38:00|     2.55|   14075.0|United Kingdom|
+    |                            5|   580538|    21544|SKULLS  WATER TRA...|      48|2011-12-05 08:38:00|     0.85|   14075.0|United Kingdom|
+
+DataFrameNaFunctions @DataFrameNaFunctions 
+-
+Dataset 의 하위 모듈로 null 데이터 처리 관련 함수를 제공. 
+
+
 카탈리스트 엔진    @catalyst engine
 -
 사용자 코드를 컴파일하여 실행 계획 수립과 최적화를 실행하는 스파크 엔진.  
