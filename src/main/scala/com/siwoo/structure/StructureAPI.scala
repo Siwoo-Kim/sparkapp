@@ -1,4 +1,4 @@
-package com.siwoo.strucutreapi
+package com.siwoo.structure
 
 import org.apache.spark.sql.types.{BooleanType, IntegerType, StructField, StructType}
 import org.apache.spark.sql.{Row, SparkSession}

@@ -1,23 +1,23 @@
 시작하기전..
 ==
-해당 문서는 스파크 개념 & 용어 간략 설명.
+해당 문서는 스파크 개념 & 용어 & 중요 포인트 간략 설명.
 
-<hr/>
 
-(1) 기본 개념 파트
-=
+기본 개념 파트
+==============
 
 스파크 Spark   @spark
 -
 클러스터 환경에서 데이터 빅데이터 를 병렬로 처리하는 computing engine<br/>
 데이터 연산 역할만 수행 -> 영구 저장소 역할은 수행하지 않음.<br/>
-cluster=여러 컴퓨터의 자원을 모아놓은 집합
+>cluster=여러 컴퓨터의 자원을 모아놓은 집합
 
    
 스파크의 필요성
 -
-problem=단일 프로세스의 성능 향상 한계.
-solution=성능 향상을 위해 병렬 cpu 코어를 추가하는 방식을 채택. (병렬 처리의 필요성)
+>problem=단일 프로세스(cpu)의 성능 향상 한계.
+>
+>solution=성능 향상을 위해 병렬 cpu 코어를 추가하는 방식을 채택. (병렬 처리의 필요성)
     
 영구저장소 Storage   @storage
 -
@@ -28,7 +28,7 @@ solution=성능 향상을 위해 병렬 cpu 코어를 추가하는 방식을 채
 하둡  @hadoop
 -
 클러스터 환경에서 컴퓨팅 시스템 (MapReduce) 와 하둡 파일시스템 (hdfs) 을 지원하는 플랫폼. <br/>
-둘 중 하나의 시스템만 단독으로 사용하기 어려움.
+둘 (MapReduce & hdfs) 중 하나의 시스템만 단독으로 사용하기 어려움.
 
 클러스터    @cluster
 -
@@ -65,6 +65,7 @@ spark.range(100).toDF("num").where("num % 2 == 0").show()
 익스큐터 프로세스. @executor
 -
 Driver 프로세스가 할당한 작업을 수행. 익스큐터의 갯수는 병렬성과 연관있다.
+> 익스큐터 프로세스간의 데이터 교환 (shuffling) 에는 네트워크을 통해 진행.
 
 분산 컬렉션  @distributed collection
 -   
@@ -110,10 +111,12 @@ Driver 프로세스가 할당한 작업을 수행. 익스큐터의 갯수는 병
 -
 1.  스파크 다운로드 http://spark.apache.org/downloads.html
 2.  스파크 빌드.
+
     <pre>
     siwoo@siwoo-ubuntu:~/Downloads$ tar -xvf spark-2.4.5-bin-hadoop2.7.tgz
     siwoo@siwoo-ubuntu:~/Downloads$ sudo mv spark-2.4.5-bin-hadoop2.7 /usr/local/spark-2.4.5
     </pre>
+    
 3. 스파크 쉘 실행.
     <pre>
     siwoo@siwoo-ubuntu:~/work/workspace/sparkapp$ SPARK_HOME=/usr/local/spark-2.4.5
@@ -127,8 +130,9 @@ Driver 프로세스가 할당한 작업을 수행. 익스큐터의 갯수는 병
 * class = 메인 클래스
 * master = 클러스터 매니저 url
     
+    
     siwoo@siwoo-ubuntu:~/work/workspace/sparkapp$ mvn clean install
-    $SPARK_HOME/bin/spark-submit 
+    siwoo@siwoo-ubuntu:$SPARK_HOME/bin/spark-submit 
     --class com.siwoo.basic.BasicExample    //main class
     target/sparkapp-1.0-SNAPSHOT.jar  /home/siwoo/work/workspace/sparkapp/src/main/resources //jar & arg
 
@@ -237,7 +241,110 @@ Row @row
     df.where($"invoiceNo".equalTo(lit(536365)))
             .select("invoiceNo", "description")
             .show(5)
-                    
+
+복합 데이터 타입 @complex data type
+-
+구조체 struct, 배열 array, 맵 map
+
+> 조체
+>> 구조체 생성 - "()" 혹은 struct(cols*)
+>> 구조체 접근 - 구조체.프러퍼티, 구조체.* (최상위 수준으로 끌어올림)
+    
+    val complexDF = df.select(
+            struct($"description", $"invoiceno").as("complex"),
+            expr("*"))
+
+    complexDF.select(
+        $"complex.description",
+        $"complex.invoiceno",
+        $"complex.*").show(5)
+        
+    +--------------------+---------+--------------------+---------+
+    |         description|invoiceno|         description|invoiceno|
+    +--------------------+---------+--------------------+---------+
+    |  RABBIT NIGHT LIGHT|   580538|  RABBIT NIGHT LIGHT|   580538|
+    | DOUGHNUT LIP GLOSS |   580538| DOUGHNUT LIP GLOSS |   580538|
+    |12 MESSAGE CARDS ...|   580538|12 MESSAGE CARDS ...|   580538|
+    |BLUE HARMONICA IN...|   580538|BLUE HARMONICA IN...|   580538|
+    |   GUMBALL COAT RACK|   580538|   GUMBALL COAT RACK|   580538|
+    +--------------------+---------+--------------------+---------++--------------------+---------+--------------------+---------+
+
+> 배열
+>> 배열 생성. - split                                       +--------------------+---------+--------------------+---------+
+>> 배열 접근 - array[index]
+>> 배열의 길이 - size(array) 
+>> 배열에서 원소 검색 - array_contains
+>> 배열 flat - explode
+
+    val arrayDF = df.select(
+            $"description",
+            split($"description", " ").as("array"))
+
+    arrayDF.select($"description",
+        $"array",
+        expr("array[0]")).show(5)
+    
+    arrayDF.select(size($"array")).show(5)
+    
+    arrayDF.select(array_contains($"array", "WHITE")).show(5)
+
+    df.withColumn("array", split($"description", " "))
+            .withColumn("exploded", explode($"array"))
+            .select($"description", $"invoiceno", $"array", $"exploded")
+            .show(5)
+            
+    +-------------------+---------+--------------------+--------+
+    |        description|invoiceno|               array|exploded|
+    +-------------------+---------+--------------------+--------+
+    | RABBIT NIGHT LIGHT|   580538|[RABBIT, NIGHT, L...|  RABBIT|
+    | RABBIT NIGHT LIGHT|   580538|[RABBIT, NIGHT, L...|   NIGHT|
+    | RABBIT NIGHT LIGHT|   580538|[RABBIT, NIGHT, L...|   LIGHT|
+    |DOUGHNUT LIP GLOSS |   580538|[DOUGHNUT, LIP, G...|DOUGHNUT|
+    |DOUGHNUT LIP GLOSS |   580538|[DOUGHNUT, LIP, G...|     LIP|
+    +-------------------+---------+--------------------+--------+
+    
+> 맵 Map
+>> 맵 생성 - map
+>> 맵의 키를 통한 값 접근 - map['프로퍼티']
+
+    df.withColumn("map", map($"description", $"invoiceno"))
+            .where(expr("map['WHITE METAL LANTERN']").isNotNull)
+            .select($"map")
+            .show(5)
+
+    +-------------------------------+
+    |map                            |
+    +-------------------------------+
+    |[WHITE METAL LANTERN -> 576642]|
+    |[WHITE METAL LANTERN -> 576654]|
+    |[WHITE METAL LANTERN -> 575138]|
+    |[WHITE METAL LANTERN -> 575739]|
+    |[WHITE METAL LANTERN -> 575875]|
+    +-------------------------------+
+    
+Explode
+-
+복합 타입의 프로퍼티를 모두 로우로 반환, 이때 나머지 다른 컬럼들은 중복됨.
+    
+1. "a b", "c d" ->  
+2. split("a b", " "), "c d"  -> 
+3. array("a", "b"), "c d" -> 
+4. explode(array("a", "b")), "c d" ->
+5. "a", "c d", "b", "c d" 
+ 
+ 
+    val explodedDF = Seq(("a b", "c d")).toDF("col1", "col2")
+    explodedDF.select(split($"col1", " ").as("array"), $"col2")
+            .select(explode($"array"), $"col2")
+            .show()
+            
+    +---+----+
+    |col|col2|
+    +---+----+
+    |  a| c d|
+    |  b| c d|
+    +---+----+
+    
 Union @union
     두 개의 DataFrame (동일한 컬럼들로 정의된) 을 합치는 연산.
     union 은 schema 가 아닌 컬럼 위치 기반으로 동작.
@@ -412,6 +519,83 @@ DataFrameNaFunctions @DataFrameNaFunctions
 -
 Dataset 의 하위 모듈로 null 데이터 처리 관련 함수를 제공. 
 
+JSON 관련 함수 @json
+-
+문자열 형태의 json 조작 및 parsing 하여 객체화.
+
+> from json
+>> json 쿼리 = get_json_object, $=root
+>> 문자열을 다시 객체화 (스키마 필요) = from_json
+> to json
+>> struct, map 데이터 타입을 json 문자열 = to_json
+
+    //from json (Querying)
+    df.select(
+        get_json_object($"json", "$").as("rootPath"),
+        get_json_object($"json", "$.key").as("path1"),
+        get_json_object($"json", "$.values[0]").as("pathForArray")
+    ).show()
+    
+    List({"key":"key1","values":[1,2,3]}, {"key":"key2","values":[2,3,4]}, {"key":"key3","values":[3,4,5]})
+    +-------------------------------+-----+------------+
+    |rootPath                       |path1|pathForArray|
+    +-------------------------------+-----+------------+
+    |{"key":"key1","values":[1,2,3]}|key1 |1           |
+    |{"key":"key2","values":[2,3,4]}|key2 |2           |
+    |{"key":"key3","values":[3,4,5]}|key3 |3           |
+    +-------------------------------+-----+------------+
+    
+    // (map & struct -> json)
+    retailDF.select(
+        struct($"description", $"invoiceno").as("complex"),
+        map($"customerid", expr("unitprice * quantity")).as("map").as("map"))
+        .select(to_json($"complex"), to_json($"map"))
+        .show(5)
+
+    +----------------------+--------------------+
+    |structstojson(complex)|  structstojson(map)|
+    +----------------------+--------------------+
+    |  {"description":"R...|   {"14075.0":85.92}|
+    |  {"description":"D...|    {"14075.0":25.0}|
+    |  {"description":"1...|{"14075.0":39.599...|
+    |  {"description":"B...|    {"14075.0":30.0}|
+    |  {"description":"G...|{"14075.0":15.299...|
+    +----------------------+--------------------+
+
+    //json -> struct
+    val schema = StructType(Seq(
+        StructField("key", StringType, false),
+        StructField("values", ArrayType(IntegerType), false)
+    ))
+
+    df.select($"json", from_json($"json", schema).as("complex"))
+            .withColumn("value", expr("complex.values[0]"))
+            .show()
+            
+    +--------------------+-----------------+-----+
+    |                json|          complex|value|
+    +--------------------+-----------------+-----+
+    |{"key":"key1","va...|[key1, [1, 2, 3]]|    1|
+    |{"key":"key2","va...|[key2, [2, 3, 4]]|    2|
+    |{"key":"key3","va...|[key3, [3, 4, 5]]|    3|
+    +--------------------+-----------------+-----+
+
+UDF
+-
+사용자 정의 함수.
+표현식이 아닌 프로그래밍 언어로 데이터를 처리할 수 있게 지원.
+함수를 정의한 후, 스파크에 등록하면 함수는 직렬화하여 네트워크를 통해 익스큐터 프로세스에 전달됨.
+
+
+    def power3(x: Double): Double = x * x * x
+    
+    //udf 함수를 등록하여, 직렬화 이후 익스큐터 프로세스로 전달
+    val myudf = udf(power3(_: Double): Double)
+    
+    spark.range(5)
+            .toDF("nums")
+            .select(myudf($"nums")) //사용자 정의 함수 사
+            .show() 
 
 카탈리스트 엔진    @catalyst engine
 -
